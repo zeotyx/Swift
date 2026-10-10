@@ -1,0 +1,14 @@
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/bin/Debug/net10.0/DPMP-SelfHosted-2
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/bin/Debug/net10.0/DPMP-SelfHosted-2.deps.json
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/bin/Debug/net10.0/DPMP-SelfHosted-2.runtimeconfig.json
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/bin/Debug/net10.0/DPMP-SelfHosted-2.dll
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/bin/Debug/net10.0/DPMP-SelfHosted-2.pdb
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.GeneratedMSBuildEditorConfig.editorconfig
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.AssemblyInfoInputs.cache
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.AssemblyInfo.cs
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.csproj.CoreCompileInputs.cache
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.dll
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/refint/DPMP-SelfHosted-2.dll
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.pdb
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/DPMP-SelfHosted-2.genruntimeconfig.cache
+/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/obj/Debug/net10.0/ref/DPMP-SelfHosted-2.dll

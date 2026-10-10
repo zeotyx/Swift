@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "iVOThxEL5d0=",
+  "success": true,
+  "projectFilePath": "/home/axel/skola/programovani/dpmp/DPMP-SelfHosted-2/DPMP-SelfHosted-2/DPMP-SelfHosted-2.csproj",
+  "expectedPackageFiles": [
+    "/home/axel/.nuget/packages/microsoft.aspnetcore.app.ref/10.0.12/microsoft.aspnetcore.app.ref.10.0.12.nupkg.sha512"
+  ],
+  "logs": []
+}

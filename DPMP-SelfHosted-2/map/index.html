@@ -1,0 +1,2264 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>DPMP</title>
+
+    <link
+            rel="stylesheet"
+            href="https://unpkg.com/maplibre-gl@5.7.1/dist/maplibre-gl.css"
+    >
+
+    <script src="https://unpkg.com/maplibre-gl@5.7.1/dist/maplibre-gl.js"></script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        #ChangeLButton {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
+        }
+
+        #destination {
+            position: absolute;
+            top: 45px;
+            left: 10px;
+            width: 180px;
+            z-index: 2;
+        }
+
+        #searchDestination {
+            position: absolute;
+            top: 45px;
+            left: 200px;
+            z-index: 2;
+        }
+
+        #routePanel {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            width: 300px;
+            max-height: 80%;
+            overflow-y: auto;
+            background: rgba(30, 30, 30, 0.95);
+            color: white;
+            border-radius: 10px;
+            padding: 10px;
+            z-index: 5;
+            display: none;
+        }
+
+        .routeCard {
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .routeCard:hover {
+            background: rgba(255, 255, 255, 0.14);
+        }
+
+        .routeCard.selected {
+            border-color: #00e5ff;
+            background: rgba(0, 229, 255, 0.12);
+        }
+
+        .live {
+            color: #00e5ff;
+        }
+
+        .early {
+            color: #55ff88;
+        }
+
+        .late {
+            color: #ff7777;
+        }
+
+        .ontime {
+            color: #ffffff;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<button id="ChangeLButton">Change Light Mode</button>
+
+<input
+        type="text"
+        id="destination"
+        placeholder="Where do you want to go?"
+>
+
+<button id="searchDestination">Search</button>
+
+<div id="routePanel"></div>
+
+<script>
+
+    const API = "http://localhost:8080";
+
+    let latitude = null;
+    let longitude = null;
+
+    let selectedRoute = null;
+    let selectedRouteConnectionId = null;
+    let selectedBoardingStop = null;
+    let selectedLiveBus = null;
+
+    let darkMode = false;
+
+    let busPositions = new Map();
+
+    let routeRequestId = 0;
+
+    const animationDuration = 5000;
+
+    const brightStyle =
+        "https://tiles.openfreemap.org/styles/bright";
+
+    const darkStyle =
+        `${window.location.origin}/Styles/darkstyle.json`;
+
+    const map = new maplibregl.Map({
+        container: "map",
+        style: brightStyle,
+        center: [15.78, 50.03],
+        zoom: 14
+    });
+
+    const geolocate =
+        new maplibregl.GeolocateControl({
+            positionOptions: {
+                enableHighAccuracy: true
+            },
+            trackUserLocation: true,
+            showUserHeading: true
+        });
+
+    map.addControl(
+        geolocate,
+        "top-right"
+    );
+
+    map.addControl(
+        new maplibregl.NavigationControl(),
+        "top-right"
+    );
+
+    geolocate.on(
+        "geolocate",
+        position => {
+            latitude =
+                position.coords.latitude;
+
+            longitude =
+                position.coords.longitude;
+        }
+    );
+
+    map.on("load", async () => {
+        await setupCustomLayers();
+    });
+
+    map.on("style.load", async () => {
+        await setupCustomLayers();
+    });
+
+
+    async function setupCustomLayers()
+    {
+        if (!map.hasImage("dpmp-bus")) {
+
+            try {
+
+                const busImage =
+                    await map.loadImage(
+                        `${window.location.origin}/Symbols/busIcon.png?v=${Date.now()}`
+                    );
+
+                if (!map.hasImage("dpmp-bus")) {
+
+                    map.addImage(
+                        "dpmp-bus",
+                        busImage.data
+                    );
+                }
+
+            }
+            catch (error) {
+
+                console.error(
+                    "Could not load bus icon:",
+                    error
+                );
+
+                return;
+            }
+        }
+
+
+        if (!map.hasImage("Stop-Icon")) {
+
+            try {
+
+                const stopImage =
+                    await map.loadImage(
+                        `${window.location.origin}/Symbols/stopIcon.png?v=${Date.now()}`
+                    );
+
+                if (!map.hasImage("Stop-Icon")) {
+
+                    map.addImage(
+                        "Stop-Icon",
+                        stopImage.data
+                    );
+                }
+
+            }
+            catch (error) {
+
+                console.error(
+                    "Could not load stop icon:",
+                    error
+                );
+            }
+        }
+
+
+        if (!map.getSource("buses")) {
+
+            map.addSource("buses", {
+                type: "geojson",
+
+                data: {
+                    type: "FeatureCollection",
+                    features: []
+                }
+            });
+        }
+
+
+        if (!map.getLayer("bus-layer")) {
+
+            map.addLayer({
+                id: "bus-layer",
+
+                type: "symbol",
+
+                source: "buses",
+
+                layout: {
+
+                    "icon-image":
+                        "dpmp-bus",
+
+                    "icon-size": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        8, 0.045,
+                        12, 0.065,
+                        16, 0.09,
+                        20, 0.11
+                    ],
+
+                    "icon-allow-overlap":
+                        true,
+
+                    "icon-ignore-placement":
+                        true
+                }
+            });
+        }
+
+
+        if (!map.getLayer("selected-bus-halo")) {
+
+            map.addLayer({
+                id: "selected-bus-halo",
+
+                type: "circle",
+
+                source: "buses",
+
+                filter: [
+                    "==",
+                    ["get", "selected"],
+                    true
+                ],
+
+                paint: {
+
+                    "circle-radius": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        8, 9,
+                        12, 12,
+                        16, 17,
+                        20, 21
+                    ],
+
+                    "circle-color":
+                        "#00e5ff",
+
+                    "circle-opacity":
+                        0.25,
+
+                    "circle-stroke-color":
+                        "#00e5ff",
+
+                    "circle-stroke-width":
+                        3
+                }
+            });
+        }
+
+
+        if (!map.getSource("walking-route")) {
+
+            map.addSource(
+                "walking-route",
+                {
+                    type: "geojson",
+
+                    data: {
+                        type: "Feature",
+
+                        geometry: {
+                            type: "LineString",
+                            coordinates: []
+                        }
+                    }
+                }
+            );
+        }
+
+
+        if (!map.getLayer("walking-route")) {
+
+            map.addLayer({
+                id: "walking-route",
+
+                type: "line",
+
+                source: "walking-route",
+
+                paint: {
+
+                    "line-color":
+                        "#3388ff",
+
+                    "line-width":
+                        5,
+
+                    "line-opacity":
+                        0.8
+                }
+            });
+        }
+
+
+        if (!map.getSource("bus-to-stop-route")) {
+
+            map.addSource(
+                "bus-to-stop-route",
+                {
+                    type: "geojson",
+
+                    data: {
+                        type: "Feature",
+
+                        geometry: {
+                            type: "LineString",
+                            coordinates: []
+                        }
+                    }
+                }
+            );
+        }
+
+
+        if (!map.getLayer("bus-to-stop-route")) {
+
+            map.addLayer({
+                id: "bus-to-stop-route",
+
+                type: "line",
+
+                source: "bus-to-stop-route",
+
+                paint: {
+
+                    "line-color":
+                        "#00e5ff",
+
+                    "line-width":
+                        5,
+
+                    "line-opacity":
+                        0.9,
+
+                    "line-dasharray": [
+                        1,
+                        1
+                    ]
+                }
+            });
+        }
+
+
+        if (!map.getSource("stops")) {
+
+            map.addSource("stops", {
+                type: "geojson",
+
+                data: {
+                    type: "FeatureCollection",
+                    features: []
+                }
+            });
+        }
+
+
+        if (
+            map.hasImage("Stop-Icon") &&
+            !map.getLayer("stops-layer")
+        ) {
+
+            map.addLayer({
+
+                id: "stops-layer",
+
+                type: "symbol",
+
+                source: "stops",
+
+                layout: {
+
+                    "icon-image":
+                        "Stop-Icon",
+
+                    "icon-size": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        8, 0.012,
+                        12, 0.018,
+                        16, 0.025,
+                        20, 0.03
+                    ],
+
+                    "icon-allow-overlap":
+                        false
+                }
+            });
+        }
+
+
+        updateStops();
+        updateBuses();
+    }
+
+
+    async function updateStops()
+    {
+        if (!map.getSource("stops"))
+            return;
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API}/api/stops`
+                );
+
+            if (!response.ok)
+                return;
+
+            const stops =
+                await response.json();
+
+            const features =
+                stops.map(stop => ({
+
+                    type: "Feature",
+
+                    geometry: {
+
+                        type: "Point",
+
+                        coordinates: [
+                            Number(stop.gpsLon),
+                            Number(stop.gpsLat)
+                        ]
+                    },
+
+                    properties: {
+
+                        id:
+                        stop.id,
+
+                        name:
+                        stop.name
+                    }
+                }));
+
+            map
+                .getSource("stops")
+                .setData({
+                    type: "FeatureCollection",
+                    features
+                });
+
+        }
+        catch (error) {
+
+            console.error(
+                "Could not update stops:",
+                error
+            );
+        }
+    }
+
+
+    async function updateBuses()
+    {
+        try {
+
+            const response =
+                await fetch(
+                    `${API}/api/autobusy`
+                );
+
+            if (!response.ok)
+                return;
+
+            const data =
+                await response.json();
+
+            const now =
+                performance.now();
+
+            const activeIds =
+                new Set();
+
+            for (const bus of data) {
+
+                const lon =
+                    Number(bus.GpsLon);
+
+                const lat =
+                    Number(bus.GpsLat);
+
+                if (
+                    !Number.isFinite(lon) ||
+                    !Number.isFinite(lat)
+                ) {
+                    continue;
+                }
+
+                const vid =
+                    bus.vid;
+
+                activeIds.add(vid);
+
+                const newPosition =
+                    [lon, lat];
+
+                const old =
+                    busPositions.get(vid);
+
+                const busData = {
+
+                    lineId:
+                    bus.lineId,
+
+                    lineDirection:
+                    bus.lineDirection,
+
+                    destinationName:
+                    bus.destinationName,
+
+                    nextStopName:
+                    bus.nextStopName,
+
+                    nextStopScheduledDepartureTime:
+                    bus.nextStopScheduledDepartureTime,
+
+                    currentDelay:
+                    bus.currentDelay,
+
+                    connectionId:
+                    bus.connectionId,
+
+                    onStation:
+                    bus.onStation
+                };
+
+
+                if (old) {
+
+                    const progress =
+                        Math.min(
+                            (
+                                now -
+                                old.startTime
+                            ) /
+                            animationDuration,
+                            1
+                        );
+
+                    const currentPosition = [
+
+                        old.start[0] +
+                        (
+                            old.target[0] -
+                            old.start[0]
+                        ) *
+                        progress,
+
+                        old.start[1] +
+                        (
+                            old.target[1] -
+                            old.start[1]
+                        ) *
+                        progress
+                    ];
+
+                    busPositions.set(
+                        vid,
+                        {
+                            start:
+                            currentPosition,
+
+                            target:
+                            newPosition,
+
+                            startTime:
+                            now,
+
+                            ...busData
+                        }
+                    );
+
+                }
+                else {
+
+                    busPositions.set(
+                        vid,
+                        {
+                            start:
+                            newPosition,
+
+                            target:
+                            newPosition,
+
+                            startTime:
+                            now,
+
+                            ...busData
+                        }
+                    );
+                }
+            }
+
+
+            for (const vid of busPositions.keys()) {
+
+                if (!activeIds.has(vid)) {
+
+                    busPositions.delete(vid);
+                }
+            }
+
+
+            updateSelectedBus();
+
+        }
+        catch (error) {
+
+            console.error(
+                "Could not update buses:",
+                error
+            );
+        }
+    }
+
+
+    function updateSelectedBus()
+    {
+        if (!selectedRouteConnectionId) {
+
+            selectedLiveBus = null;
+
+            updateBusSource();
+
+            clearBusToStopRoute();
+
+            return;
+        }
+
+
+        selectedLiveBus =
+            [...busPositions.entries()]
+                .find(
+                    ([vid, bus]) =>
+                        String(bus.connectionId) ===
+                        String(selectedRouteConnectionId)
+                );
+
+
+        if (selectedLiveBus) {
+
+            selectedLiveBus = {
+
+                vid:
+                    selectedLiveBus[0],
+
+                ...selectedLiveBus[1]
+            };
+
+        }
+        else {
+
+            selectedLiveBus = null;
+        }
+
+
+        updateBusSource();
+
+
+        if (selectedLiveBus) {
+
+            updateBusToStopRoute(
+                selectedLiveBus
+            );
+
+        }
+        else {
+
+            clearBusToStopRoute();
+        }
+
+
+        updateRoutePanelLiveInfo();
+    }
+
+
+    function updateBusSource()
+    {
+        const features = [];
+
+
+        for (
+            const [vid, position]
+            of busPositions
+            ) {
+
+            const progress =
+                Math.min(
+                    (
+                        performance.now() -
+                        position.startTime
+                    ) /
+                    animationDuration,
+                    1
+                );
+
+
+            const longitude =
+                position.start[0] +
+                (
+                    position.target[0] -
+                    position.start[0]
+                ) *
+                progress;
+
+
+            const latitude =
+                position.start[1] +
+                (
+                    position.target[1] -
+                    position.start[1]
+                ) *
+                progress;
+
+
+            const selected =
+                selectedRouteConnectionId !== null &&
+                String(position.connectionId) ===
+                String(selectedRouteConnectionId);
+
+
+            features.push({
+
+                type: "Feature",
+
+                geometry: {
+
+                    type: "Point",
+
+                    coordinates: [
+                        longitude,
+                        latitude
+                    ]
+                },
+
+                properties: {
+
+                    vid,
+
+                    lineId:
+                    position.lineId,
+
+                    lineDirection:
+                    position.lineDirection,
+
+                    destinationName:
+                    position.destinationName,
+
+                    nextStopName:
+                    position.nextStopName,
+
+                    nextStopScheduledDepartureTime:
+                    position.nextStopScheduledDepartureTime,
+
+                    currentDelay:
+                    position.currentDelay,
+
+                    connectionId:
+                    position.connectionId,
+
+                    onStation:
+                    position.onStation,
+
+                    selected
+                }
+            });
+        }
+
+
+        const source =
+            map.getSource("buses");
+
+
+        if (source) {
+
+            source.setData({
+
+                type: "FeatureCollection",
+
+                features
+            });
+        }
+    }
+
+
+    function animateBuses(timestamp)
+    {
+        updateBusSource();
+
+        requestAnimationFrame(
+            animateBuses
+        );
+    }
+
+
+    requestAnimationFrame(
+        animateBuses
+    );
+
+
+    setInterval(
+        updateBuses,
+        5000
+    );
+
+
+    map.on(
+        "click",
+        "bus-layer",
+        event => {
+
+            if (
+                !event.features ||
+                !event.features.length
+            ) {
+                return;
+            }
+
+            const properties =
+                event.features[0].properties;
+
+            new maplibregl.Popup()
+                .setLngLat(event.lngLat)
+                .setHTML(`
+
+                <b>Line:</b>
+                ${escapeHtml(
+                    properties.lineId
+                )}<br>
+
+                <b>Destination:</b>
+                ${escapeHtml(
+                    properties.destinationName
+                )}<br>
+
+                <b>Next stop:</b>
+                ${escapeHtml(
+                    properties.nextStopName
+                )}<br>
+
+                <b>Delay:</b>
+                ${escapeHtml(
+                    properties.currentDelay
+                )}<br>
+
+                <b>Vehicle:</b>
+                ${escapeHtml(
+                    properties.vid
+                )}
+            `)
+                .addTo(map);
+        }
+    );
+
+
+    map.on(
+        "mouseenter",
+        "bus-layer",
+        () => {
+
+            map.getCanvas().style.cursor =
+                "pointer";
+        }
+    );
+
+
+    map.on(
+        "mouseleave",
+        "bus-layer",
+        () => {
+
+            map.getCanvas().style.cursor =
+                "";
+        }
+    );
+
+
+    map.on(
+        "click",
+        "stops-layer",
+        event => {
+
+            if (
+                !event.features ||
+                !event.features.length
+            ) {
+                return;
+            }
+
+            const properties =
+                event.features[0].properties;
+
+            new maplibregl.Popup()
+                .setLngLat(event.lngLat)
+                .setHTML(`
+
+                <b>
+                    ${escapeHtml(
+                    properties.name
+                )}
+                </b><br>
+
+                Stop ID:
+                ${escapeHtml(
+                    properties.id
+                )}
+            `)
+                .addTo(map);
+        }
+    );
+
+
+    map.on(
+        "mouseenter",
+        "stops-layer",
+        () => {
+
+            map.getCanvas().style.cursor =
+                "pointer";
+        }
+    );
+
+
+    map.on(
+        "mouseleave",
+        "stops-layer",
+        () => {
+
+            map.getCanvas().style.cursor =
+                "";
+        }
+    );
+
+
+    document
+        .getElementById("ChangeLButton")
+        .addEventListener(
+            "click",
+            () => {
+
+                darkMode =
+                    !darkMode;
+
+                map.setStyle(
+                    darkMode
+                        ? darkStyle
+                        : brightStyle
+                );
+            }
+        );
+
+
+    document
+        .getElementById("searchDestination")
+        .addEventListener(
+            "click",
+            searchDestination
+        );
+
+
+    document
+        .getElementById("destination")
+        .addEventListener(
+            "keydown",
+            event => {
+
+                if (
+                    event.key === "Enter"
+                ) {
+
+                    searchDestination();
+                }
+            }
+        );
+
+
+    async function searchDestination()
+    {
+        if (
+            latitude === null ||
+            longitude === null
+        ) {
+
+            alert(
+                "Waiting for your location."
+            );
+
+            return;
+        }
+
+
+        const destination =
+            document
+                .getElementById("destination")
+                .value
+                .trim();
+
+
+        if (!destination)
+            return;
+
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API}/api/stops`
+                );
+
+
+            if (!response.ok) {
+
+                alert(
+                    "Could not load stops."
+                );
+
+                return;
+            }
+
+
+            const stops =
+                await response.json();
+
+
+            const destinationLower =
+                destination.toLowerCase();
+
+
+            const stop =
+                stops.find(
+                    s =>
+                        s.name
+                            .toLowerCase() ===
+                        destinationLower
+                ) ||
+                stops.find(
+                    s =>
+                        s.name
+                            .toLowerCase()
+                            .includes(
+                                destinationLower
+                            )
+                );
+
+
+            if (!stop) {
+
+                alert(
+                    "Stop not found."
+                );
+
+                return;
+            }
+
+
+            const routeResponse =
+                await fetch(
+                    `${API}/api/route` +
+                    `?lat=${latitude}` +
+                    `&lon=${longitude}` +
+                    `&toStop=${stop.id}`
+                );
+
+
+            if (!routeResponse.ok) {
+
+                alert(
+                    "Routing failed."
+                );
+
+                return;
+            }
+
+
+            const routes =
+                await routeResponse.json();
+
+
+            if (
+                !routes ||
+                !Array.isArray(routes) ||
+                routes.length === 0
+            ) {
+
+                alert(
+                    "No route found."
+                );
+
+                return;
+            }
+
+
+            showRoutes(routes);
+
+
+            const route =
+                routes[0];
+
+
+            const fromStop =
+                stops.find(
+                    s =>
+                        s.id ===
+                        route.fromStop
+                );
+
+
+            if (!fromStop) {
+
+                alert(
+                    "Starting stop not found."
+                );
+
+                return;
+            }
+
+
+            selectedBoardingStop = {
+
+                id:
+                fromStop.id,
+
+                name:
+                fromStop.name,
+
+                gpsLat:
+                    Number(fromStop.gpsLat),
+
+                gpsLon:
+                    Number(fromStop.gpsLon)
+            };
+
+
+            await drawWalkingRoute(
+                latitude,
+                longitude,
+                Number(fromStop.gpsLat),
+                Number(fromStop.gpsLon)
+            );
+
+
+            map.flyTo({
+
+                center: [
+                    Number(fromStop.gpsLon),
+                    Number(fromStop.gpsLat)
+                ],
+
+                zoom: 15
+            });
+
+        }
+        catch (error) {
+
+            console.error(
+                "Could not calculate route:",
+                error
+            );
+
+            alert(
+                "Could not calculate route."
+            );
+        }
+    }
+
+
+    function showRoutes(routes)
+    {
+        const panel =
+            document.getElementById(
+                "routePanel"
+            );
+
+
+        panel.style.display =
+            "block";
+
+
+        panel.innerHTML =
+            "";
+
+
+        for (
+            let i = 0;
+            i < routes.length;
+            i++
+        ) {
+
+            const route =
+                routes[i];
+
+
+            const card =
+                document.createElement(
+                    "div"
+                );
+
+
+            card.className =
+                "routeCard";
+
+
+            card.dataset.index =
+                i;
+
+
+            card.innerHTML = `
+
+            <b>
+                Line ${escapeHtml(
+                route.lineId
+            )}
+            </b><br>
+
+            ${escapeHtml(
+                route.fromStopName
+            )}<br>
+
+            Scheduled:
+            ${escapeHtml(
+                route.departureTime
+            )}
+
+            <br>
+
+            ↓
+
+            <br>
+
+            ${escapeHtml(
+                route.toStopName
+            )}
+
+            <br>
+
+            ${escapeHtml(
+                route.arrivalTime
+            )}
+
+            <div class="live-info">
+                Checking live bus...
+            </div>
+        `;
+
+
+            card.addEventListener(
+                "click",
+                async () => {
+
+                    await selectRoute(
+                        route,
+                        i
+                    );
+                }
+            );
+
+
+            panel.appendChild(
+                card
+            );
+        }
+
+
+        selectRoute(
+            routes[0],
+            0
+        );
+    }
+
+
+    async function selectRoute(
+        route,
+        index
+    )
+    {
+        selectedRoute =
+            route;
+
+
+        selectedRouteConnectionId =
+            String(
+                route.connectionId
+            )
+                .split(" → ")[0];
+
+
+        const cards =
+            document.querySelectorAll(
+                ".routeCard"
+            );
+
+
+        cards.forEach(
+            (card, i) => {
+
+                card.classList.toggle(
+                    "selected",
+                    i === index
+                );
+            }
+        );
+
+
+        try {
+
+            const stopsResponse =
+                await fetch(
+                    `${API}/api/stops`
+                );
+
+
+            if (
+                stopsResponse.ok
+            ) {
+
+                const stops =
+                    await stopsResponse.json();
+
+
+                const boardingStop =
+                    stops.find(
+                        stop =>
+                            stop.id ===
+                            route.fromStop
+                    );
+
+
+                if (boardingStop) {
+
+                    selectedBoardingStop = {
+
+                        id:
+                        boardingStop.id,
+
+                        name:
+                        boardingStop.name,
+
+                        gpsLat:
+                            Number(
+                                boardingStop.gpsLat
+                            ),
+
+                        gpsLon:
+                            Number(
+                                boardingStop.gpsLon
+                            )
+                    };
+                }
+            }
+
+        }
+        catch (error) {
+
+            console.error(
+                "Could not load boarding stop:",
+                error
+            );
+        }
+
+
+        updateSelectedBus();
+
+
+        if (selectedLiveBus) {
+
+            await updateBusToStopRoute(
+                selectedLiveBus
+            );
+        }
+    }
+
+
+    function updateRoutePanelLiveInfo()
+    {
+        if (!selectedRoute)
+            return;
+
+
+        const cards =
+            document.querySelectorAll(
+                ".routeCard"
+            );
+
+
+        cards.forEach(
+            card => {
+
+                const info =
+                    card.querySelector(
+                        ".live-info"
+                    );
+
+
+                if (!info)
+                    return;
+
+
+                if (
+                    card.classList.contains(
+                        "selected"
+                    )
+                ) {
+
+                    if (!selectedLiveBus) {
+
+                        info.innerHTML = `
+                        <hr>
+                        <span class="live">
+                            LIVE BUS NOT CURRENTLY AVAILABLE
+                        </span>
+                    `;
+
+                        return;
+                    }
+
+
+                    const delay =
+                        parseDelay(
+                            selectedLiveBus.currentDelay
+                        );
+
+
+                    let delayText =
+                        "on time";
+
+                    let delayClass =
+                        "ontime";
+
+
+                    if (delay < 0) {
+
+                        delayText =
+                            `${formatMinutes(
+                                Math.abs(delay)
+                            )} min early`;
+
+                        delayClass =
+                            "early";
+
+                    }
+                    else if (delay > 0) {
+
+                        delayText =
+                            `${formatMinutes(
+                                delay
+                            )} min late`;
+
+                        delayClass =
+                            "late";
+                    }
+
+
+                    info.innerHTML = `
+
+                    <hr>
+
+                    <b class="live">
+                        LIVE BUS
+                    </b><br>
+
+                    Vehicle:
+                    ${escapeHtml(
+                        selectedLiveBus.vid
+                    )}<br>
+
+                    <span class="${delayClass}">
+                        ${delayText}
+                    </span><br>
+
+                    Next stop:
+                    ${escapeHtml(
+                        selectedLiveBus.nextStopName
+                    )}
+                `;
+
+                }
+            }
+        );
+    }
+
+
+    async function updateBusToStopRoute(bus)
+    {
+        if (
+            !bus ||
+            !selectedBoardingStop
+        ) {
+
+            clearBusToStopRoute();
+
+            return;
+        }
+
+
+        const requestId =
+            ++routeRequestId;
+
+
+        const busPosition =
+            getAnimatedBusPosition(
+                bus
+            );
+
+
+        if (!busPosition)
+            return;
+
+
+        const fromLat =
+            busPosition[1];
+
+        const fromLon =
+            busPosition[0];
+
+
+        const toLat =
+            Number(
+                selectedBoardingStop.gpsLat
+            );
+
+        const toLon =
+            Number(
+                selectedBoardingStop.gpsLon
+            );
+
+
+        if (
+            !Number.isFinite(fromLat) ||
+            !Number.isFinite(fromLon) ||
+            !Number.isFinite(toLat) ||
+            !Number.isFinite(toLon)
+        ) {
+
+            return;
+        }
+
+
+        try {
+
+            const response =
+                await fetch(
+                    "https://valhalla1.openstreetmap.de/route",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body:
+                            JSON.stringify({
+
+                                locations: [
+
+                                    {
+                                        lat:
+                                        fromLat,
+
+                                        lon:
+                                        fromLon
+                                    },
+
+                                    {
+                                        lat:
+                                        toLat,
+
+                                        lon:
+                                        toLon
+                                    }
+                                ],
+
+                                costing:
+                                    "auto",
+
+                                units:
+                                    "kilometers"
+                            })
+                    }
+                );
+
+
+            if (
+                !response.ok
+            ) {
+
+                console.error(
+                    "Bus route failed:",
+                    response.status
+                );
+
+                return;
+            }
+
+
+            const data =
+                await response.json();
+
+
+            if (
+                requestId !==
+                routeRequestId
+            ) {
+
+                return;
+            }
+
+
+            if (
+                !data.trip ||
+                !data.trip.legs ||
+                !data.trip.legs[0]
+            ) {
+
+                clearBusToStopRoute();
+
+                return;
+            }
+
+
+            const coordinates =
+                decodePolyline6(
+                    data
+                        .trip
+                        .legs[0]
+                        .shape
+                );
+
+
+            const source =
+                map.getSource(
+                    "bus-to-stop-route"
+                );
+
+
+            if (source) {
+
+                source.setData({
+
+                    type: "Feature",
+
+                    geometry: {
+
+                        type:
+                            "LineString",
+
+                        coordinates
+                    }
+                });
+            }
+
+        }
+        catch (error) {
+
+            console.error(
+                "Could not update bus route:",
+                error
+            );
+        }
+    }
+
+
+    function getAnimatedBusPosition(bus)
+    {
+        if (!bus)
+            return null;
+
+
+        const progress =
+            Math.min(
+                (
+                    performance.now() -
+                    bus.startTime
+                ) /
+                animationDuration,
+                1
+            );
+
+
+        return [
+
+            bus.start[0] +
+            (
+                bus.target[0] -
+                bus.start[0]
+            ) *
+            progress,
+
+            bus.start[1] +
+            (
+                bus.target[1] -
+                bus.start[1]
+            ) *
+            progress
+        ];
+    }
+
+
+    function clearBusToStopRoute()
+    {
+        routeRequestId++;
+
+
+        const source =
+            map.getSource(
+                "bus-to-stop-route"
+            );
+
+
+        if (source) {
+
+            source.setData({
+
+                type:
+                    "Feature",
+
+                geometry: {
+
+                    type:
+                        "LineString",
+
+                    coordinates: []
+                }
+            });
+        }
+    }
+
+
+    async function drawWalkingRoute(
+        fromLat,
+        fromLon,
+        toLat,
+        toLon
+    )
+    {
+        try {
+
+            const response =
+                await fetch(
+                    "https://valhalla1.openstreetmap.de/route",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body:
+                            JSON.stringify({
+
+                                locations: [
+
+                                    {
+                                        lat:
+                                        fromLat,
+
+                                        lon:
+                                        fromLon
+                                    },
+
+                                    {
+                                        lat:
+                                        toLat,
+
+                                        lon:
+                                        toLon
+                                    }
+                                ],
+
+                                costing:
+                                    "pedestrian",
+
+                                units:
+                                    "kilometers"
+                            })
+                    }
+                );
+
+
+            if (!response.ok) {
+
+                console.error(
+                    "Walking route failed:",
+                    response.status
+                );
+
+                return;
+            }
+
+
+            const data =
+                await response.json();
+
+
+            if (
+                !data.trip ||
+                !data.trip.legs ||
+                !data.trip.legs[0]
+            ) {
+
+                return;
+            }
+
+
+            const coordinates =
+                decodePolyline6(
+                    data
+                        .trip
+                        .legs[0]
+                        .shape
+                );
+
+
+            const source =
+                map.getSource(
+                    "walking-route"
+                );
+
+
+            if (source) {
+
+                source.setData({
+
+                    type:
+                        "Feature",
+
+                    geometry: {
+
+                        type:
+                            "LineString",
+
+                        coordinates
+                    }
+                });
+            }
+
+        }
+        catch (error) {
+
+            console.error(
+                "Could not draw walking route:",
+                error
+            );
+        }
+    }
+
+
+    function RouteToBus()
+    {
+        if (
+            latitude === null ||
+            longitude === null
+        ) {
+
+            return;
+        }
+
+
+        fetch(
+            `${API}/api/closest-bus` +
+            `?lat=${latitude}` +
+            `&lon=${longitude}`
+        )
+            .then(
+                response =>
+                    response.json()
+            )
+            .then(
+                data => {
+
+                    if (
+                        !data ||
+                        !data.lat ||
+                        !data.lon
+                    ) {
+
+                        return;
+                    }
+
+
+                    return fetch(
+                        "https://valhalla1.openstreetmap.de/route",
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body:
+                                JSON.stringify({
+
+                                    locations: [
+
+                                        {
+                                            lat:
+                                            latitude,
+
+                                            lon:
+                                            longitude
+                                        },
+
+                                        {
+                                            lat:
+                                                Number(
+                                                    data.lat
+                                                ),
+
+                                            lon:
+                                                Number(
+                                                    data.lon
+                                                )
+                                        }
+                                    ],
+
+                                    costing:
+                                        "pedestrian",
+
+                                    units:
+                                        "kilometers"
+                                })
+                        }
+                    );
+                }
+            )
+            .then(
+                response =>
+                    response
+                        ? response.json()
+                        : null
+            )
+            .then(
+                data => {
+
+                    if (
+                        !data ||
+                        !data.trip ||
+                        !data.trip.legs
+                    ) {
+
+                        return;
+                    }
+
+
+                    const coordinates =
+                        decodePolyline6(
+                            data
+                                .trip
+                                .legs[0]
+                                .shape
+                        );
+
+
+                    const source =
+                        map.getSource(
+                            "walking-route"
+                        );
+
+
+                    if (source) {
+
+                        source.setData({
+
+                            type:
+                                "Feature",
+
+                            geometry: {
+
+                                type:
+                                    "LineString",
+
+                                coordinates
+                            }
+                        });
+                    }
+                }
+            );
+    }
+
+
+    function decodePolyline6(str)
+    {
+        let index = 0;
+        let lat = 0;
+        let lon = 0;
+
+        const coordinates = [];
+
+
+        while (
+            index < str.length
+            ) {
+
+            let result = 0;
+            let shift = 0;
+            let byte;
+
+
+            do {
+
+                byte =
+                    str.charCodeAt(
+                        index++
+                    ) - 63;
+
+                result |=
+                    (byte & 0x1f) <<
+                    shift;
+
+                shift += 5;
+
+            }
+            while (
+                byte >= 0x20
+                );
+
+
+            const deltaLat =
+                result & 1
+                    ? ~(result >> 1)
+                    : result >> 1;
+
+
+            lat +=
+                deltaLat;
+
+
+            result = 0;
+            shift = 0;
+
+
+            do {
+
+                byte =
+                    str.charCodeAt(
+                        index++
+                    ) - 63;
+
+                result |=
+                    (byte & 0x1f) <<
+                    shift;
+
+                shift += 5;
+
+            }
+            while (
+                byte >= 0x20
+                );
+
+
+            const deltaLon =
+                result & 1
+                    ? ~(result >> 1)
+                    : result >> 1;
+
+
+            lon +=
+                deltaLon;
+
+
+            coordinates.push([
+
+                lon / 1000000,
+                lat / 1000000
+
+            ]);
+        }
+
+
+        return coordinates;
+    }
+
+
+    function parseDelay(value)
+    {
+        if (!value)
+            return 0;
+
+
+        const match =
+            value.match(
+                /^(-)?PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/
+            );
+
+
+        if (!match)
+            return 0;
+
+
+        const sign =
+            match[1]
+                ? -1
+                : 1;
+
+
+        const hours =
+            Number(
+                match[2] || 0
+            );
+
+
+        const minutes =
+            Number(
+                match[3] || 0
+            );
+
+
+        const seconds =
+            Number(
+                match[4] || 0
+            );
+
+
+        return sign *
+            (
+                hours * 3600 +
+                minutes * 60 +
+                seconds
+            );
+    }
+
+
+    function formatMinutes(seconds)
+    {
+        const minutes =
+            Math.round(
+                seconds / 60
+            );
+
+
+        return Math.max(
+            1,
+            minutes
+        );
+    }
+
+
+    function escapeHtml(value)
+    {
+        return String(
+            value ?? ""
+        )
+            .replaceAll(
+                "&",
+                "&amp;"
+            )
+            .replaceAll(
+                "<",
+                "&lt;"
+            )
+            .replaceAll(
+                ">",
+                "&gt;"
+            )
+            .replaceAll(
+                '"',
+                "&quot;"
+            )
+            .replaceAll(
+                "'",
+                "&#039;"
+            );
+    }
+
+</script>
+
+</body>
+</html>
