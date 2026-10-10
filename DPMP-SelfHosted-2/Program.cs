@@ -379,12 +379,6 @@ static async Task HandleRoute(
                         .GetProperty("connectionId")
                         .ToString();
 
-                /*
-                 * Find the FIRST usable occurrence of the current stop.
-                 *
-                 * This is important for looping connections where the same
-                 * stop can appear more than once.
-                 */
                 int boardingIndex = -1;
 
                 for (
@@ -410,21 +404,7 @@ static async Task HandleRoute(
                     if (!departure.HasValue)
                         continue;
 
-                    /*
-                     * THIS is the important catchability check.
-                     *
-                     * We compare:
-                     *
-                     *     arrival at boarding stop
-                     *                 +
-                     *          safety margin
-                     *
-                     * against:
-                     *
-                     *     departure FROM boarding stop
-                     *
-                     * The destination arrival is NOT involved here.
-                     */
+
                     if (
                         departure.Value >=
                         state.arrivalTime +
